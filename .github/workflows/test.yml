@@ -111,8 +111,20 @@ jobs:
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml down -v
       - name: Bring up licensed stack
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml -f docker-compose.licensed.yaml up -d
-      - name: Wait for licensed ADS + PLC ports
-        run: sleep 10
+      - name: Wait for licensed ADS + PLC ports (up to 60s)
+        run: |
+          for i in $(seq 1 60); do
+            plc_bound=$(docker exec tc31-xar-base sh -c 'cat /proc/net/tcp6 2>/dev/null | grep -c BF02' || echo 0)
+            # additional sanity: check both PLC app ports bind inside container
+            plc_851=$(docker exec tc31-xar-base sh -c 'cat /proc/net/tcp 2>/dev/null' | grep -c ':0353' || echo 0)
+            if [ "$plc_bound" -ge 1 ]; then
+              echo "ADS port bound after ${i}s (PLC internal listeners=$plc_851)"
+              break
+            fi
+            sleep 1
+          done
+          echo "--- tc31-xar-base log snapshot ---"
+          docker logs tc31-xar-base 2>&1 | tail -40
       - name: Run PLC e2e tests (bundled licensed image, sidecar)
         run: |
           docker run --rm --network container-network --ip 192.168.20.100 \
