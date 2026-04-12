@@ -88,15 +88,46 @@ jobs:
             -t tc31-xar-base:licensed \
             -f ./tc31-xar-base/Dockerfile.licensed \
             ./tc31-xar-base
-      - name: Run base e2e tests (no bundled PLC)
-        env:
-          CONTAINER_ENGINE: docker
-        run: pytest tests/e2e -v --deselect tests/e2e/test_plc_runtime.py
-      - name: Run PLC e2e tests (bundled licensed image)
-        env:
-          CONTAINER_ENGINE: docker
-          USE_LICENSED_IMAGE: "1"
-        run: pytest tests/e2e/test_plc_runtime.py -v
+      - name: Bring up test stack (base image)
+        run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml up -d
+      - name: Wait for broker + ADS port
+        run: |
+          for i in $(seq 1 60); do
+            docker compose -f docker-compose.yaml -f docker-compose.test.yaml exec -T tc31-xar-base sh -c 'ss -tlnp 2>/dev/null | grep -q :48898' && break || true
+            sleep 1
+          done
+      - name: Run base e2e tests (sidecar inside container-network)
+        run: |
+          docker run --rm --network container-network --ip 192.168.20.100 \
+            -v "$PWD:/work:z" -w /work \
+            -e STACK_ALREADY_UP=1 -e MQTT_HOST=mosquitto \
+            -e ADS_HOST=tc31-xar-base -e ADS_AMS_NETID=15.15.15.15.1.1 \
+            -e LOCAL_AMS_NETID=1.1.1.1.1.1 \
+            python:3.12-slim bash -c \
+              "pip install --quiet pytest pyads paho-mqtt pyyaml lxml && \
+               pytest tests/e2e -v --deselect tests/e2e/test_plc_runtime.py"
+      - name: Tear down base stack
+        if: always()
+        run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml down -v
+      - name: Bring up licensed stack
+        run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml -f docker-compose.licensed.yaml up -d
+      - name: Wait for licensed ADS + PLC ports
+        run: sleep 10
+      - name: Run PLC e2e tests (bundled licensed image, sidecar)
+        run: |
+          docker run --rm --network container-network --ip 192.168.20.100 \
+            -v "$PWD:/work:z" -w /work \
+            -e STACK_ALREADY_UP=1 -e USE_LICENSED_IMAGE=1 -e MQTT_HOST=mosquitto \
+            -e ADS_HOST=tc31-xar-base -e ADS_AMS_NETID=15.15.15.15.1.1 \
+            -e LOCAL_AMS_NETID=1.1.1.1.1.1 \
+            python:3.12-slim bash -c \
+              "pip install --quiet pytest pyads paho-mqtt pyyaml lxml && \
+               pytest tests/e2e/test_plc_runtime.py -v"
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          echo "--- tc31-xar-base ---"; docker logs tc31-xar-base || true
+          echo "--- mosquitto ---"; docker logs mosquitto || true
 
   # NOTE: e2e-windows is intentionally omitted. Docker Desktop on
   # windows-latest runners is unavailable (requires interactive license
