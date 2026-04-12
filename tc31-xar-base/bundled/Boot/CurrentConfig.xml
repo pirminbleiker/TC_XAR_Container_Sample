@@ -2,8 +2,8 @@
 <TcBootProject CreateTime="2026-04-12T13:48:46" Platform="TwinCAT OS (x64-E)">
 	<System>
 		<LockedMemSize>33554432</LockedMemSize>
-		<AffinityMask>#x1</AffinityMask>
-		<TComSrvAffinity>#x1</TComSrvAffinity>
+		<AffinityMask>#x200</AffinityMask>
+		<TComSrvAffinity>#x200</TComSrvAffinity>
 		<RtParam>
 			<P1 Desc="MaxStackSize">64</P1>
 			<P2 Desc="NumRtCores">1</P2>
