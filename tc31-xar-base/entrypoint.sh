@@ -31,6 +31,13 @@ if [ -n "${FAKETIME}" ] && [ -n "${FAKETIME_LIB}" ] && [ -f "${FAKETIME_LIB}" ];
     echo "Faketime active: FAKETIME=${FAKETIME}"
 fi
 
+# Start a tiny syslog daemon so TcSystemServiceUm's syslog() calls (the
+# Linux-side equivalent of the Windows TwinCAT System Event Logger) land
+# somewhere readable — /var/log/messages.
+if command -v busybox >/dev/null 2>&1 && [ ! -S /dev/log ]; then
+    busybox syslogd -S -L -O /var/log/messages -s 1024 -b 0 || true
+fi
+
 # Indicate the script's start for logging purposes
 echo "Starting TcSystemServiceUm..."
 
