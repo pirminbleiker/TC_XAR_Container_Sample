@@ -109,17 +109,19 @@ jobs:
       - name: Tear down base stack
         if: always()
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml down -v
+      - name: Diagnostic — runner hardware
+        run: |
+          echo "--- nproc ---"; nproc
+          echo "--- /proc/cpuinfo family/model ---"
+          grep -E 'model name|cpu family|^model\b|vendor_id' /proc/cpuinfo | sort -u
+          echo "--- memory ---"; free -h
+          echo "--- docker info ---"; docker info --format 'Server={{.ServerVersion}} OS={{.OperatingSystem}} CPUs={{.NCPU}} Memory={{.MemTotal}}' || true
       - name: Bring up licensed stack
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml -f docker-compose.licensed.yaml up -d
       - name: Wait for licensed runtime to load PLC
         run: |
-          # Runtime takes several seconds on first boot to read registry,
-          # apply config, and load both PLC ports. Give it time.
           for i in $(seq 1 60); do
             sleep 1
-            # End early if the runtime logged the TrialLicense being validated
-            # or we see a Plc30 hint — either is a decent signal it's past
-            # pure AMS router init.
             if docker logs tc31-xar-base 2>&1 | grep -qE "Plc30|TrialLicense|License ok"; then
               echo "PLC runtime appears loaded after ${i}s"
               break
@@ -129,13 +131,21 @@ jobs:
           docker logs tc31-xar-base 2>&1
           echo "--- listening sockets in container ---"
           docker exec tc31-xar-base sh -c 'cat /proc/net/tcp /proc/net/tcp6' | head -30
+          echo "--- PID1 status + open fds ---"
+          docker exec tc31-xar-base sh -c 'cat /proc/1/status | head -10; echo; ls -la /proc/1/fd/' || true
+          echo "--- LoggedEvents DB row counts ---"
+          docker cp tc31-xar-base:/etc/TwinCAT/3.1/Boot/LoggedEvents.db /tmp/le.db || true
+          python3 -c "
+          import sqlite3
+          c = sqlite3.connect('/tmp/le.db')
+          for t in ('Events','Entities','AlarmState','ActiveAlarms','Arguments','JsonAttributes'):
+              try: print(t, list(c.execute(f'SELECT COUNT(*) FROM {t}'))[0][0])
+              except Exception as e: print(t, 'err', e)
+          print('--- recent events ---')
+          for r in c.execute('SELECT e.Id,e.Time,en.EventClass,en.EventId,en.Severity FROM Events e JOIN Entities en ON e.EntityId=en.Id ORDER BY e.Id DESC LIMIT 20'):
+              print(r)
+          " || true
       - name: Run PLC e2e tests (bundled licensed image, sidecar)
-        # The bundled Port_8xx.app blobs carry thread affinities that were
-        # captured on a workstation with many cores. On GH ubuntu-latest
-        # (4 vCPUs) the PLC task scheduler may refuse to bind and the
-        # runtime stays below RUN. Flag as informational — locally with
-        # a matching host the tests pass (see README).
-        continue-on-error: true
         run: |
           docker run --rm --network container-network --ip 192.168.20.100 \
             -v "$PWD:/work:z" -w /work \
