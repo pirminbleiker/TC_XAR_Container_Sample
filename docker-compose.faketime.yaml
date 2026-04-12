@@ -1,0 +1,33 @@
+# Freeze the container's clock to a fixed point in time and persist both
+# the license file and the deployed boot project across restarts. Intended
+# for test pipelines that need the TwinCAT trial license to stay valid
+# indefinitely (trial = 7 days from issue, independent of real date).
+#
+# Use alongside the base + test overlays:
+#   docker compose \
+#     -f docker-compose.yaml \
+#     -f docker-compose.test.yaml \
+#     -f docker-compose.faketime.yaml \
+#     up -d
+#
+# Change FAKETIME to any timestamp within the license validity window
+# (see /etc/TwinCAT/3.1/Target/License/TrialLicense.tclrs: IssueTime and
+# ExpireTime) to keep the runtime starting.
+services:
+  tc31-xar-base:
+    image: tc31-xar-base:faketime
+    environment:
+      - AMS_NETID=15.15.15.15.1.1
+      - PCI_DEVICES=NONE
+      # @ prefix freezes the clock (does not advance). Without @ the clock
+      # advances from the given anchor at real wall-clock speed.
+      # Override via host env: FAKETIME='@2026-05-01 12:00:00' compose up -d
+      - FAKETIME=${FAKETIME:-@2026-04-15 12:00:00}
+      - FAKETIME_LIB=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
+    volumes:
+      - tc-license:/etc/TwinCAT/3.1/Target/License
+      - tc-boot:/etc/TwinCAT/3.1/Boot
+
+volumes:
+  tc-license:
+  tc-boot:

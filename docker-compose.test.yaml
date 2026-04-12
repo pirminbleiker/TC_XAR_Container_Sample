@@ -1,0 +1,22 @@
+# Test overlay. Combine with base compose:
+#   docker compose -f docker-compose.yaml -f docker-compose.test.yaml up -d
+#
+# Goals:
+#   * disable RT-ethernet probing (no HW needed in CI / dev machines)
+#   * expose ADS ports on the host so pyads from host/Win can reach the XAR
+#   * mount a test StaticRoutes.xml that adds a static ADS route back to the
+#     test host, so dynamic AddRoute is not required
+services:
+  tc31-xar-base:
+    environment:
+      - AMS_NETID=15.15.15.15.1.1
+      - PCI_DEVICES=NONE
+    ulimits:
+      memlock: -1
+      rtprio: 99
+    ports:
+      - "48898:48898/tcp"
+      - "48899:48899/udp"
+    volumes:
+      - ./tests/fixtures/StaticRoutes.test.xml:/etc/TwinCAT/3.1/Target/StaticRoutes.xml:ro
+      - ./tc31-xar-base/entrypoint.sh:/app/entrypoint.sh:ro

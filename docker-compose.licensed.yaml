@@ -1,0 +1,16 @@
+# Overlay that runs tc31-xar-base:licensed — a fully sealed image with the
+# bundled trial license + PLC boot project baked in. The license stays
+# valid because the licensed image ships with a FAKETIME default that
+# anchors the container's clock inside the license window.
+#
+# Usage (full compose stack with bundled PLC app):
+#   docker compose \
+#     -f docker-compose.yaml \
+#     -f docker-compose.test.yaml \
+#     -f docker-compose.licensed.yaml \
+#     up -d
+#
+# No volumes — bundled files in the image must not be shadowed.
+services:
+  tc31-xar-base:
+    image: tc31-xar-base:licensed

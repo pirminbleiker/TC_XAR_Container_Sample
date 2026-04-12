@@ -2,7 +2,7 @@ FROM debian:trixie-slim
 
 # Install curl and ca-certificates to load bhf.asc signing file from beckhoff.com during build
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends \
+    && apt-get install --yes --no-install-recommends mosquitto-clients \
     curl \
     ca-certificates
 

@@ -1,0 +1,21 @@
+[project]
+name = "tc31-xar-container-sample-tests"
+version = "0.1.0"
+description = "Unit and E2E tests for the TwinCAT XAR container sample."
+requires-python = ">=3.10"
+dependencies = [
+    "pytest>=8.0",
+    "pyads>=3.4",
+    "paho-mqtt>=1.6",
+    "pyyaml>=6.0",
+    "lxml>=5.0",
+    "invoke>=2.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "e2e: end-to-end tests requiring a running container stack",
+    "unit: pure config/lint tests (no container runtime needed)",
+]

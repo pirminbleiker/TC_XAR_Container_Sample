@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MQTT route for a TwinCAT Engineering host running inside a Hyper-V VM
+  attached to the Windows "Default Switch".
+
+  Uses the Hyper-V internal DNS suffix `.mshome.net`. The Windows host
+  auto-registers under this name on the Default Switch and resolves to
+  EXACTLY ONE IP (the current Default Switch IP). A plain hostname would
+  resolve via LAN DNS to many unreachable IPs causing TwinCAT's MQTT
+  client to time out before finding the reachable one.
+
+  Replace NB-119 with YOUR Windows host name (run `hostname` on the host).
+
+  Install path in the VM:
+    C:\ProgramData\Beckhoff\TwinCAT\3.1\Target\Routes\
+  (older installs may use C:\TwinCAT\3.1\Target\Routes\)
+  Restart the TwinCAT System Service after copying:
+    net stop TcSystemService && net start TcSystemService
+-->
+<TcConfig xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2015/12/TcConfig">
+<RemoteConnections>
+    <Mqtt Unidirectional="true">
+        <Address Port="1883">NB-119.mshome.net</Address>
+        <Topic>AdsOverMqtt</Topic>
+    </Mqtt>
+</RemoteConnections>
+</TcConfig>
