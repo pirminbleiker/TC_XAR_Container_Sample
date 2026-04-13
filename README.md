@@ -10,16 +10,22 @@ packaged for two very different targets:
 
 What you can do with this sample:
 
-- Build a two-tier image stack for the XAR runtime
-  (`:latest`, `:faketime`) with Docker + BuildKit secrets.
+- Build a single unified `tc31-xar-base` image (Docker + BuildKit
+  secrets). The image ships **only** the TwinCAT XAR runtime — no
+  license, no PLC application — so it can be redistributed freely.
+- Activate `libfaketime` support on-demand via the `FAKETIME`
+  environment variable (unset → normal clock, set → frozen clock).
 - Run ADS-over-MQTT communication with a Mosquitto sidecar.
 - Deploy a PLC project from TwinCAT Engineering running inside a
   Hyper-V VM, using only a Windows Firewall rule (no `netsh portproxy`).
 - Persist the issued trial license + PLC boot project in named volumes
   so container rebuilds pick them back up — the license stays valid
   as long as the host's SystemId does.
-- Automate a CI pipeline on GitHub Actions that builds both images, runs
-  unit + end-to-end tests (System Service, ADS, MQTT bridge).
+- Automate a CI pipeline on GitHub Actions that builds the image, runs
+  unit + end-to-end tests (System Service, ADS, MQTT bridge), and
+  publishes the license-free base image to `ghcr.io`.
+- Extend the published base image with your own PLC project + license
+  to build site-specific deployment images — see [`examples/`](./examples/).
 
 Topology:
 
@@ -160,14 +166,40 @@ sudo make restart-containers
 
 ---
 
-## Image tiers
+## Image
 
-The repo builds two images from the same XAR base:
+One unified image — `tc31-xar-base:latest`:
 
-| Tag | What's in it | Typical use |
-| --- | --- | --- |
-| `tc31-xar-base:latest` | Debian trixie + `tc31-xar-um` + mosquitto-clients + busybox-syslogd. Entrypoint uses `-f 0x5` (systemd-unit default) and handles `PCI_DEVICES=NONE` so the RT-Ethernet probe is skipped. | Base tests, CI, RT-Linux IPCs. |
-| `tc31-xar-base:faketime` | `:latest` + `libfaketime`. Entrypoint forwards `FAKETIME` env through `LD_PRELOAD`. Freezes the container clock to a fixed timestamp so the 7-day trial license never expires during tests — combined with the named volumes in `docker-compose.faketime.yaml` (`tc-license`, `tc-boot`) the license + PLC survive container recreates. | Engineering-activation workflow + parallel self-hosted CI runs sharing one license volume. |
+- Debian trixie + `tc31-xar-um` + `mosquitto-clients` + `busybox-syslogd`
+  + `faketime`.
+- Entrypoint uses `-f 0x5` (systemd-unit default), honours
+  `PCI_DEVICES=NONE` to skip the RT-Ethernet probe, and **activates
+  `libfaketime` only when `FAKETIME` is set**:
+
+  ```bash
+  # normal clock — default
+  docker run ... tc31-xar-base:latest
+
+  # frozen clock at a timestamp inside your license window
+  docker run -e FAKETIME='@2026-04-15 12:00:00' ... tc31-xar-base:latest
+  ```
+
+- No license, no PLC boot project baked in. `docker-compose.faketime.yaml`
+  adds named volumes (`tc-license`, `tc-boot`) so an Engineering-
+  activated license + deployed project persist across container
+  recreates on the same host.
+
+### Pulling the published image
+
+The default branch CI pushes to GHCR after the e2e job is green:
+
+```
+ghcr.io/<owner>/tc31-xar-base:latest
+ghcr.io/<owner>/tc31-xar-base:<short-sha>
+```
+
+Consume as-is (ADS + MQTT experimentation) or `FROM` it to bake your
+own PLC / license — example in [`examples/`](./examples/).
 
 ## Running the tests
 
@@ -336,7 +368,8 @@ docker exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'AdsOverMqtt/#' -v
 | --- | --- | --- |
 | `unit-linux` | `ubuntu-latest` | Static config tests — no Docker, fast. |
 | `unit-windows` | `windows-latest` | Same static suite on Windows — catches CRLF / path regressions. |
-| `e2e-linux` | `ubuntu-latest` | Builds both images (`:latest`, `:faketime`), brings the base stack up, runs `tests/e2e` inside a pinned sidecar container on `192.168.20.100`. |
+| `e2e-linux` | `ubuntu-latest` | Builds `tc31-xar-base:latest`, brings the base stack up, runs `tests/e2e` inside a pinned sidecar container on `192.168.20.100`. |
+| `publish-ghcr` | `ubuntu-latest` | After `e2e-linux` passes on `main`, rebuilds the image and pushes it to `ghcr.io/<owner>/tc31-xar-base:latest` + `:<short-sha>`. |
 
 Requires the repo secret `BHF_APT_CONF` — paste the full netrc-style
 content of your `bhf.conf`. Without it the `e2e-linux` job fails fast

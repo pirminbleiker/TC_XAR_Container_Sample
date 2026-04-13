@@ -21,12 +21,20 @@ RUN --mount=type=secret,id=apt \
 RUN rm /etc/apt/sources.list.d/debian.sources
 COPY ./apt-config/bhf.list ./apt-config/debian.sources.list /etc/apt/sources.list.d/
 
-# Install TwinCAT runtime package
+# Install the TwinCAT runtime package. libfaketime is pulled in so the
+# entrypoint can optionally freeze the system clock (only when FAKETIME
+# is set in the container environment — see entrypoint.sh).
 RUN --mount=type=secret,id=apt \
     apt-get -o "Dir::Etc::netrc=/run/secrets/apt" update \
     && apt-get -o "Dir::Etc::netrc=/run/secrets/apt" install --yes \
     tc31-xar-um \
+    faketime \
     && rm -rf /var/lib/apt/lists/*
+
+# Path to the libfaketime shared object; kept in the environment so the
+# entrypoint doesn't have to hard-code it. No LD_PRELOAD is set here —
+# the runtime only loads libfaketime when FAKETIME is provided.
+ENV FAKETIME_LIB=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1
 
 # As an example, copy basic TwinCAT runtime configurations files
 ARG TC3_DIR=/etc/TwinCAT/3.1
