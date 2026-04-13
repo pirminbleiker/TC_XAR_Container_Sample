@@ -76,12 +76,12 @@ jobs:
             ./tc31-xar-base
       - name: Bring up test stack (base image)
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml up -d
-      - name: Wait for broker + ADS port
-        run: |
-          for i in $(seq 1 60); do
-            docker compose -f docker-compose.yaml -f docker-compose.test.yaml exec -T tc31-xar-base sh -c 'ss -tlnp 2>/dev/null | grep -q :48898' && break || true
-            sleep 1
-          done
+      # The base image is intentionally minimal (no ss/netstat/lsof),
+      # so an external readiness poll has nothing to grep for. The e2e
+      # fixtures in tests/e2e/conftest.py already retry TCP connects to
+      # the broker + ADS port via _wait_for_tcp() with the same timeout
+      # we would poll here — so we skip the extra wait step and let
+      # pytest handle readiness.
       - name: Run base e2e tests (sidecar inside container-network)
         run: |
           docker run --rm --network container-network --ip 192.168.20.100 \
