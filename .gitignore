@@ -6,6 +6,9 @@ tc31-xar-base/apt-config/bhf.conf
 # and run full PLC tests. Regenerate via `docker cp` from a live activated
 # container when the trial expires (see Dockerfile.licensed header).
 
+# MQTT/ADS capture dumps
+scripts/captures/
+
 # Python / pytest artefacts
 __pycache__/
 *.py[cod]
