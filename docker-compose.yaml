@@ -1,3 +1,13 @@
+# A named network with a fixed subnet is only needed so external
+# tooling (our pyads sidecar in tests/CI, or a second PLC container
+# on a specific IP) can pin itself predictably on the same broadcast
+# domain. The TwinCAT runtime + broker themselves only need hostname
+# resolution (Docker DNS handles that automatically), so no
+# ipv4_address is assigned to their services.
+#
+# On a real Beckhoff IPC with RT-Ethernet + direct AMS-TCP routing
+# the fixed-IP style from the upstream sample is still advisable —
+# keep that behaviour for RT deployments.
 networks:
   container-network:
     name: container-network
@@ -18,8 +28,7 @@ services:
     volumes:
       - ./simple-mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     networks:
-      container-network:
-        ipv4_address: 192.168.20.2
+      - container-network
 
   tc31-xar-base:
     image: tc31-xar-base:latest
@@ -38,8 +47,7 @@ services:
       #   - tc-logs:/var/log
       #   - ./logs:/var/log
     networks:
-      container-network:
-        ipv4_address: 192.168.20.3
+      - container-network
     # Use PCI_DEVICES as environment variables to specify the Ethernet
     # controllers which can be used by the TwinCAT runtime for real-time
     # ethernet communication.
