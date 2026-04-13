@@ -13,13 +13,6 @@ FROM tc31-xar-base:faketime
 
 COPY bundled/TrialLicense.tclrs /etc/TwinCAT/3.1/Target/License/TrialLicense.tclrs
 COPY bundled/Boot /etc/TwinCAT/3.1/Boot
-# Pin the self-signed cert + /etc/machine-id so SystemId derivation is
-# deterministic across runs and across hosts (otherwise TcSelfSigned is
-# regenerated on first boot with a fresh RSA pair, and machine-id is
-# empty in the base debian image — both are inputs to the runtime's
-# SystemId fingerprint).
-COPY bundled/TcSelfSigned.xml /etc/TwinCAT/3.1/Target/TcSelfSigned.xml
-COPY bundled/machine-id /etc/machine-id
 
 # Default FAKETIME sits in the middle of the bundled license's 7-day
 # window. Override at runtime via `-e FAKETIME=...` if you regenerate the
