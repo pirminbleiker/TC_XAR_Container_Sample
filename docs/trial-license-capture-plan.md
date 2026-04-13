@@ -167,7 +167,44 @@ e2e step and retry a few times (license server rate limits).
 
 - `scripts/mqtt-ads-capture.py` — sniffer.
 - `scripts/ads-decode.py` — decoder.
+- `scripts/read-systemid.py` — runtime SystemId probe (IG 0x01010004,
+  IO 0x00000001, 16-byte LE GUID).
 - `scripts/captures/*.jsonl` — raw captures (gitignored).
-- `scripts/request-trial-license.py` — replay client (if feasible).
-- `docs/trial-license-capture-plan.md` — this file; updated with
-  findings after each phase.
+- `docs/trial-license-capture-plan.md` — this file.
+
+## Findings (2026-04-13)
+
+**Option 2 is not viable.**
+
+1. The *Activate 7 Days Trial License* button is a **single ADS Write**
+   to port 30 (LicenseServer), IG=`0x01010003`, IO=`0x00000000`, 400 bytes.
+2. The 400-byte payload is the **complete signed trial license** — not
+   a request. Engineering talks to Beckhoff's online license service
+   itself (HTTPS, proprietary), pulls back a signed blob hard-bound to
+   the target's SystemId GUID, and pushes it to the runtime via ADS.
+3. Captured blob layout:
+   - bytes 0–255: crypto signature / signed header
+   - bytes 256–271: SystemId (LE GUID)
+   - bytes 272–287: FILETIME timestamps (issue + expire)
+   - bytes 288+: license product entries (`3 × 32` bytes =
+     LicenseId GUID + 16 zero padding each).
+4. SystemId readback from running container:
+   - IG=`0x01010004`, IO=`0x00000001`, read 16 bytes → GUID (LE).
+5. SystemId is derived from **host hardware** and varies per runner.
+   - Local Docker Desktop (one host):
+     `{3FDD3ACB-E849-6721-2870-41BCE9784CAD}` — stable.
+   - GH `ubuntu-latest` run #1: `519F0458-872C-C4FE-CDE2-D102BF374B82`.
+   - GH `ubuntu-latest` run #2: `6D8EE7EA-76EC-C2B8-5744-9596B3FE7DC9`.
+6. Baking `TcSelfSigned.xml` + `/etc/machine-id` + hostname makes the
+   signature-check pass (`Valid(3)`) but the **product consumption step
+   still fails** — the runtime compares the license's embedded SystemId
+   to its live-computed one, which mixes host CPU information the
+   container inherits and we cannot neutralise.
+
+**Conclusion:** we cannot self-provision a trial from CI. The only
+viable paths are:
+
+- **Self-hosted GH Actions runner on the dev host** (SystemId stable,
+  bundled license works).
+- **PLC tests local-only**; CI validates build + base runtime + MQTT +
+  System Service ADS — which is what the workflow now does.
