@@ -170,8 +170,11 @@ sudo make restart-containers
 
 One unified image — `tc31-xar-base:latest`:
 
-- Debian trixie + `tc31-xar-um` + `mosquitto-clients` + `busybox-syslogd`
-  + `faketime`.
+- Debian trixie + `tc31-xar-um` + `busybox-syslogd` + `faketime`.
+- **No MQTT broker** — the broker is a separate `eclipse-mosquitto`
+  container in `docker-compose.yaml`; the TwinCAT image stays focused
+  on the runtime. Multiple `tc31-xar-base` services can share the
+  same broker (see [Scaling to multiple PLCs](#scaling-to-multiple-plcs)).
 - Entrypoint uses `-f 0x5` (systemd-unit default), honours
   `PCI_DEVICES=NONE` to skip the RT-Ethernet probe, and **activates
   `libfaketime` only when `FAKETIME` is set**:
@@ -185,9 +188,53 @@ One unified image — `tc31-xar-base:latest`:
   ```
 
 - No license, no PLC boot project baked in. `docker-compose.faketime.yaml`
-  adds named volumes (`tc-license`, `tc-boot`) so an Engineering-
-  activated license + deployed project persist across container
-  recreates on the same host.
+  adds named volumes (`tc-license`, `tc-boot`, `tc-logs`) so an
+  Engineering-activated license, the deployed project and the syslog
+  output all persist across container recreates on the same host.
+
+**MQTT route is env-templated** — the broker address, port and topic
+in `StaticRoutes.xml` are regenerated on every boot from:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MQTT_BROKER_HOST` | `mosquitto` | Hostname / IP of the MQTT broker. |
+| `MQTT_BROKER_PORT` | `1883` | Broker TCP port. |
+| `MQTT_TOPIC` | `AdsOverMqtt` | Topic prefix. Give each PLC container its own (`AdsOverMqtt_plcA`, …) when they share one broker. |
+| `TC_STATIC_ROUTES_MANAGED` | `1` | Set to `0` (and bind-mount your own file at `/etc/TwinCAT/3.1/Target/StaticRoutes.xml`) if you need full control. |
+
+### Scaling to multiple PLCs
+
+Because the MQTT broker is a separate container, running more than one
+TwinCAT instance is a matter of adding services that all share the
+broker:
+
+```yaml
+# docker-compose.override.yaml
+services:
+  plc-line-a:
+    image: ghcr.io/<owner>/tc31-xar-base:latest
+    hostname: plc-line-a
+    environment:
+      - AMS_NETID=15.15.15.15.1.1
+      - PCI_DEVICES=NONE
+    networks:
+      container-network:
+        ipv4_address: 192.168.20.11
+
+  plc-line-b:
+    image: ghcr.io/<owner>/tc31-xar-base:latest
+    hostname: plc-line-b
+    environment:
+      - AMS_NETID=15.15.15.15.1.2
+      - PCI_DEVICES=NONE
+    networks:
+      container-network:
+        ipv4_address: 192.168.20.12
+```
+
+Each container publishes to the same broker on topic
+`AdsOverMqtt/<AmsNetId>/…` and is addressed independently from
+TwinCAT Engineering.
 
 ### Pulling the published image
 
@@ -354,7 +401,7 @@ Test-NetConnection NB-119.mshome.net -Port 1883   # TcpTestSucceeded: True
 **Watching ADS-over-MQTT traffic live** (useful while debugging an activation):
 
 ```bash
-# requires mosquitto-clients on the host or inside any container
+# mosquitto_sub ships with the broker container — exec into it:
 docker exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'AdsOverMqtt/#' -v
 ```
 

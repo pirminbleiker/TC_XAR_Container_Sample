@@ -23,7 +23,12 @@ services:
     volumes:
       - tc-license:/etc/TwinCAT/3.1/Target/License
       - tc-boot:/etc/TwinCAT/3.1/Boot
+      # TwinCAT syslog() output (captured by busybox-syslogd into
+      # /var/log/messages) + LoggedEvents.db sibling under /var/log —
+      # persisted so runs can be analysed after the container is gone.
+      - tc-logs:/var/log
 
 volumes:
   tc-license:
   tc-boot:
+  tc-logs:

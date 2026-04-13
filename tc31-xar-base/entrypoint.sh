@@ -31,6 +31,30 @@ if [ -n "${FAKETIME}" ] && [ -n "${FAKETIME_LIB}" ] && [ -f "${FAKETIME_LIB}" ];
     echo "Faketime active: FAKETIME=${FAKETIME}"
 fi
 
+# Regenerate StaticRoutes.xml from environment on every boot so the
+# MQTT broker address + topic can be changed per container instance
+# without rebuilding the image. Pin with TC_STATIC_ROUTES_MANAGED=0 (or
+# bind-mount a fully custom file read-only) if you want to manage the
+# routes file yourself.
+#   MQTT_BROKER_HOST  default: mosquitto
+#   MQTT_BROKER_PORT  default: 1883
+#   MQTT_TOPIC        default: AdsOverMqtt
+STATIC_ROUTES=/etc/TwinCAT/3.1/Target/StaticRoutes.xml
+if [ "${TC_STATIC_ROUTES_MANAGED:-1}" = "1" ] && [ -w "${STATIC_ROUTES}" ]; then
+    cat > "${STATIC_ROUTES}" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<TcConfig xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2015/12/TcConfig">
+<RemoteConnections>
+    <Mqtt>
+        <Address Port="${MQTT_BROKER_PORT:-1883}">${MQTT_BROKER_HOST:-mosquitto}</Address>
+        <Topic>${MQTT_TOPIC:-AdsOverMqtt}</Topic>
+    </Mqtt>
+</RemoteConnections>
+</TcConfig>
+EOF
+fi
+
 # Start a tiny syslog daemon so TcSystemServiceUm's syslog() calls (the
 # Linux-side equivalent of the Windows TwinCAT System Event Logger) land
 # somewhere readable — /var/log/messages.

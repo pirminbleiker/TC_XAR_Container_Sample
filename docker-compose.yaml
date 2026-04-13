@@ -31,6 +31,12 @@ services:
     privileged: true
     volumes:
       - /dev/hugepages:/dev/hugepages:rw
+      # Optional: expose the runtime's /var/log so TwinCAT syslog()
+      # output + other log files can be inspected and archived from
+      # outside the container. Use either a named volume or a
+      # host-side bind mount:
+      #   - tc-logs:/var/log
+      #   - ./logs:/var/log
     networks:
       container-network:
         ipv4_address: 192.168.20.3
@@ -53,3 +59,15 @@ services:
     environment:
       #- PCI_DEVICES=NONE
       - AMS_NETID=15.15.15.15.1.1
+      # Optional: override the MQTT route written to StaticRoutes.xml on
+      # every boot. Defaults: mosquitto / 1883 / AdsOverMqtt.
+      # When multiple PLC containers share one broker, give each its
+      # own MQTT_TOPIC (e.g. AdsOverMqtt_plcA, AdsOverMqtt_plcB) so
+      # Engineering discovery stays separated.
+      #- MQTT_BROKER_HOST=mosquitto
+      #- MQTT_BROKER_PORT=1883
+      #- MQTT_TOPIC=AdsOverMqtt
+      # Set TC_STATIC_ROUTES_MANAGED=0 AND mount your own file at
+      # /etc/TwinCAT/3.1/Target/StaticRoutes.xml if you want full
+      # control over the routes file.
+      #- TC_STATIC_ROUTES_MANAGED=0

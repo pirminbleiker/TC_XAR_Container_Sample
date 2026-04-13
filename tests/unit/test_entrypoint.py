@@ -39,6 +39,19 @@ def test_writes_pidfile(entrypoint):
     assert "-p /var/run/TcSystemServiceUm.pid" in entrypoint
 
 
+def test_faketime_guarded_by_env(entrypoint):
+    # libfaketime only engages when FAKETIME is set AND the lib exists.
+    assert 'if [ -n "${FAKETIME}" ]' in entrypoint
+    assert 'export LD_PRELOAD="${FAKETIME_LIB}"' in entrypoint
+
+
+def test_static_routes_env_templated(entrypoint):
+    # Broker host / port / topic are overridable per container via env.
+    for var in ("MQTT_BROKER_HOST", "MQTT_BROKER_PORT", "MQTT_TOPIC",
+                "TC_STATIC_ROUTES_MANAGED"):
+        assert var in entrypoint, f"entrypoint missing env hook: {var}"
+
+
 def test_shellcheck_clean(entrypoint_path):
     shellcheck = shutil.which("shellcheck")
     if not shellcheck:

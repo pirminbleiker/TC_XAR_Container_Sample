@@ -11,6 +11,10 @@ services:
     environment:
       - AMS_NETID=15.15.15.15.1.1
       - PCI_DEVICES=NONE
+      # The test fixture StaticRoutes.test.xml adds a static route back
+      # to the pyads sidecar. Disable entrypoint templating so our
+      # mounted file is not overwritten.
+      - TC_STATIC_ROUTES_MANAGED=0
     ulimits:
       memlock: -1
       rtprio: 99

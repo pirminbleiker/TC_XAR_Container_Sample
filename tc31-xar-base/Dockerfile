@@ -1,10 +1,15 @@
 FROM debian:trixie-slim
 
-# Install curl and ca-certificates to load bhf.asc signing file from beckhoff.com during build.
-# busybox-syslogd provides a tiny syslog daemon so TcSystemServiceUm's syslog() calls
-# are captured in /var/log/messages — the standard Linux location for TwinCAT UM logs.
+# curl + ca-certificates: fetch bhf.asc during build.
+# busybox-syslogd: tiny syslog daemon so TcSystemServiceUm's syslog()
+# calls land in /var/log/messages (Linux equivalent of the Windows
+# TwinCAT System Event Logger).
+#
+# The MQTT broker lives in a separate eclipse-mosquitto container; no
+# broker daemon or client CLI is installed in this image — that keeps
+# the runtime image focused on being just the TwinCAT runtime.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends mosquitto-clients \
+    && apt-get install --yes --no-install-recommends \
     curl \
     ca-certificates \
     busybox-syslogd
