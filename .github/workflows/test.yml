@@ -122,6 +122,19 @@ jobs:
           done
           echo "--- tc31-xar-base syslog tail ---"
           docker exec tc31-xar-base sh -c 'cat /var/log/syslog 2>/dev/null' | tail -20 || true
+      - name: Read container SystemId for license forensics
+        continue-on-error: true
+        run: |
+          docker run --rm --network container-network --ip 192.168.20.100 \
+            python:3.12-slim bash -c \
+              "pip install --quiet pyads && python -c '
+          import pyads, uuid
+          pyads.open_port(); pyads.set_local_address(\"1.1.1.1.1.1\")
+          c = pyads.Connection(\"15.15.15.15.1.1\", 30, \"tc31-xar-base\"); c.open()
+          raw = bytes(bytearray(c.read(0x01010004, 0x00000001, pyads.PLCTYPE_BYTE * 16)))
+          print(\"CI runtime SystemId:\", uuid.UUID(bytes_le=raw))
+          c.close(); pyads.close_port()
+          '"
       - name: Run PLC e2e tests (bundled licensed image, sidecar)
         env:
           USE_LICENSED_IMAGE: "1"
