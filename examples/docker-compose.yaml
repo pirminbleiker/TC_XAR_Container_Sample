@@ -1,0 +1,76 @@
+# Zero-build quickstart — pulls the published base image from GHCR,
+# starts a Mosquitto broker + TwinCAT XAR runtime side by side.
+#
+#   docker compose -f examples/docker-compose.yaml up -d
+#
+# On first boot the runtime has no license and no PLC project, so it
+# stays in CONFIG. Activate from TwinCAT Engineering via the MQTT route
+# (target AmsNetId 15.15.15.15.1.1) to push your license + boot project
+# into the persistent volumes — from then on every `docker compose up`
+# brings the PLC back to RUN as long as you stay on the same host.
+#
+# Requirements on the Docker host:
+#   - /dev/hugepages mounted hugetlbfs with at least 64 pages reserved,
+#     e.g. `sudo sysctl vm.nr_hugepages=64` (or 1024 for headroom).
+#   - privileged + rt scheduling ulimits (see services.tc31-xar-base).
+
+networks:
+  container-network:
+    name: container-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.168.20.0/24
+          gateway: 192.168.20.1
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    hostname: mosquitto
+    ports:
+      - "1883:1883"
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - container-network
+
+  tc31-xar-base:
+    # Published by this sample's CI on every push to main.
+    image: ghcr.io/pirminbleiker/tc31-xar-base:latest
+    container_name: tc31-xar-base
+    hostname: tc31-xar-base
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    privileged: true
+    ulimits:
+      memlock: -1
+      rtprio: 99
+    ports:
+      - "48898:48898/tcp"
+      - "48899:48899/udp"
+    volumes:
+      - /dev/hugepages:/dev/hugepages:rw
+      - tc-license:/etc/TwinCAT/3.1/Target/License
+      - tc-boot:/etc/TwinCAT/3.1/Boot
+      - tc-logs:/var/log
+    environment:
+      - AMS_NETID=15.15.15.15.1.1
+      - PCI_DEVICES=NONE
+      # Anchor the clock inside the trial-license window so the
+      # Engineering-activated license stays valid indefinitely on this
+      # host. Override via host env for a different window.
+      - FAKETIME=${FAKETIME:-@2026-04-15 12:00:00}
+      # Leave the defaults (broker=mosquitto, port=1883, topic=AdsOverMqtt)
+      # or override for multi-PLC setups.
+      #- MQTT_BROKER_HOST=mosquitto
+      #- MQTT_TOPIC=AdsOverMqtt
+    networks:
+      - container-network
+
+volumes:
+  tc-license:
+  tc-boot:
+  tc-logs:

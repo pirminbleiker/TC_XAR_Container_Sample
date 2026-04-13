@@ -1,13 +1,49 @@
-# Deployment example — bake PLC + license into a downstream image
+# Examples
 
-This folder shows how to package a concrete PLC application on top of
-the upstream `tc31-xar-base` image.
+Two ready-made recipes on top of the published
+[`ghcr.io/pirminbleiker/tc31-xar-base:latest`](https://github.com/users/pirminbleiker/packages/container/package/tc31-xar-base)
+image:
 
-The upstream image carries only the TwinCAT XAR runtime — **no license,
-no PLC project** — so it can be safely distributed. Downstream images
-add the site-specific bits.
+1. **`docker-compose.yaml`** — zero-build quickstart. Pulls the image,
+   starts a Mosquitto broker + the TwinCAT runtime, persists license
+   and PLC boot project in named volumes. One command to bring the
+   whole thing up.
+2. **`Dockerfile.app`** — derivative image that bakes a specific PLC
+   project + license for site-deployment.
 
-## 1. Pull the base image
+## Quickstart (just run it)
+
+```bash
+docker compose -f examples/docker-compose.yaml up -d
+```
+
+That's it. On first boot the runtime enters `RUN` with no license and
+no PLC project — enough to experiment with ADS and the MQTT bridge.
+To load a PLC application:
+
+1. Point TwinCAT Engineering at the broker (see the repo README for
+   the Hyper-V / Windows route template).
+2. `Activate Configuration` against `AmsNetId 15.15.15.15.1.1`. The
+   generated `TrialLicense.tclrs` + `Boot/` directory land in the
+   `tc-license` and `tc-boot` Docker volumes.
+3. Subsequent `docker compose up` calls pick the persisted state up
+   automatically — the container re-enters RUN with the PLC loaded.
+
+Tear down without losing state:
+
+```bash
+docker compose -f examples/docker-compose.yaml down
+# license + boot survive; remove with --volumes if you want a reset.
+```
+
+## Deployment — bake PLC + license into a downstream image
+
+The image on GHCR carries only the TwinCAT XAR runtime — **no license,
+no PLC project** — so it's redistribution-safe. When you ship a
+concrete machine (same host hardware as the activation host!) you can
+freeze the state into a derivative image with `Dockerfile.app`.
+
+### 1. Pull the base image
 
 ```bash
 docker pull ghcr.io/<your-github-owner>/tc31-xar-base:latest
@@ -16,7 +52,7 @@ docker pull ghcr.io/<your-github-owner>/tc31-xar-base:latest
 Or build it yourself from this repository's root `tc31-xar-base/`
 directory — requires a valid `bhf.conf` with myBeckhoff credentials.
 
-## 2. Capture your runtime state
+### 2. Capture your runtime state
 
 After a successful *Activate Configuration* from TwinCAT Engineering,
 copy the two locations out of the running container:
@@ -32,13 +68,13 @@ Clean the copy — the runtime writes its own diagnostics file:
 rm -f ./examples/my-app/Boot/LoggedEvents.db
 ```
 
-## 3. Build the deployment image
+### 3. Build the deployment image
 
 ```bash
 docker build -t my-org/plc-station:2026.04 -f examples/Dockerfile.app examples/
 ```
 
-## 4. Run it
+### 4. Run it
 
 ```bash
 docker run -d --privileged \

@@ -275,8 +275,14 @@ ghcr.io/<owner>/tc31-xar-base:latest
 ghcr.io/<owner>/tc31-xar-base:<short-sha>
 ```
 
-Consume as-is (ADS + MQTT experimentation) or `FROM` it to bake your
-own PLC / license — example in [`examples/`](./examples/).
+Quickstart — zero local build, just pull the image and run:
+
+```bash
+docker compose -f examples/docker-compose.yaml up -d
+```
+
+See [`examples/README.md`](./examples/README.md) for the full flow
+(engineering activation, persistent volumes, deployment images).
 
 ## Running the tests
 
