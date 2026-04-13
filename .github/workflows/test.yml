@@ -35,10 +35,12 @@ jobs:
         run: pytest tests/unit -v
 
   e2e-linux:
-    # Runs on a Linux runner with Docker preinstalled. Requires the repo
-    # secret BHF_APT_CONF to contain a valid netrc-style bhf.conf for the
-    # Beckhoff apt mirror. Builds all three image tiers and exercises the
-    # fully bundled PLC runtime (:licensed) end-to-end.
+    # Builds the base + faketime images and drives the base e2e suite
+    # (container boot, System Service ADS, MQTT bridge, AdsOverMqtt
+    # frames). PLC-runtime tests require a valid TwinCAT trial license,
+    # which is bound to host-specific SystemId — impossible to issue
+    # from an ephemeral GitHub cloud runner. Run those tests on a
+    # self-hosted runner where the license volume survives the job.
     runs-on: ubuntu-latest
     needs: unit-linux
     if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -80,14 +82,6 @@ jobs:
             -t tc31-xar-base:faketime \
             -f ./tc31-xar-base/Dockerfile.faketime \
             ./tc31-xar-base
-      - name: Build tc31-xar-base:licensed
-        run: |
-          DOCKER_BUILDKIT=1 docker build \
-            --secret id=apt,src=./tc31-xar-base/apt-config/bhf.conf \
-            --network host \
-            -t tc31-xar-base:licensed \
-            -f ./tc31-xar-base/Dockerfile.licensed \
-            ./tc31-xar-base
       - name: Bring up test stack (base image)
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml up -d
       - name: Wait for broker + ADS port
@@ -105,23 +99,10 @@ jobs:
             -e LOCAL_AMS_NETID=1.1.1.1.1.1 \
             python:3.12-slim bash -c \
               "pip install --quiet pytest pyads paho-mqtt pyyaml lxml && \
-               pytest tests/e2e -v --deselect tests/e2e/test_plc_runtime.py"
+               pytest tests/e2e -v"
       - name: Tear down base stack
         if: always()
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml down -v
-      # :licensed PLC tests stay out of CI. Empirical findings:
-      #  - SystemId is STABLE on a given host (survives docker rm+run).
-      #  - SystemId DIFFERS per GH Actions job (runner HW varies).
-      #  - /proc/cpuinfo bind-mount does not alter it (TwinCAT reads
-      #    CPUID directly, not /proc).
-      #  - /proc/sys/kernel/random/boot_id cannot be bind-mounted
-      #    (Docker procfs-safety rejects it).
-      #  - Engineering's "Activate Trial" pushes a pre-signed blob from
-      #    Beckhoff's online license service — cannot be self-provisioned
-      #    from a runner.
-      # See docs/trial-license-capture-plan.md for the full trace.
-      # Run tests/e2e/test_plc_runtime.py locally or on a self-hosted
-      # runner; the SystemId there matches the bundled trial.
 
   # NOTE: e2e-windows is intentionally omitted. Docker Desktop on
   # windows-latest runners is unavailable (requires interactive license

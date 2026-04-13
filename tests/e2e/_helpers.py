@@ -4,10 +4,7 @@ from __future__ import annotations
 import os
 
 CONTAINER_ENGINE = os.environ.get("CONTAINER_ENGINE", "docker")
-_BASE_COMPOSE = ["-f", "docker-compose.yaml", "-f", "docker-compose.test.yaml"]
-if os.environ.get("USE_LICENSED_IMAGE") == "1":
-    _BASE_COMPOSE += ["-f", "docker-compose.licensed.yaml"]
-COMPOSE_FILES = _BASE_COMPOSE
+COMPOSE_FILES = ["-f", "docker-compose.yaml", "-f", "docker-compose.test.yaml"]
 STACK_SERVICE = "tc31-xar-base"
 
 

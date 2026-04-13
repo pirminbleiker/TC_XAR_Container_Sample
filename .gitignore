@@ -1,10 +1,6 @@
 # Beckhoff apt credentials — never commit, copy from bhf.conf.example
 tc31-xar-base/apt-config/bhf.conf
 
-# Captured runtime artefacts (trial license bound to SystemId + PLC boot
-# project). Committed intentionally so CI can build tc31-xar-base:licensed
-# and run full PLC tests. Regenerate via `docker cp` from a live activated
-# container when the trial expires (see Dockerfile.licensed header).
 
 # Python / pytest artefacts
 __pycache__/

@@ -12,8 +12,10 @@ make CI/cloud scenarios a lot easier.
   The GitHub Actions runner even brings the runtime up, which was a
   pleasant surprise.
 - On a stable host (workstation, self-hosted runner) a trial license
-  activated once via Engineering is enough: the `:licensed` image
-  boots PLC 851/852 into `RUN` reliably.
+  activated once via Engineering is enough: the named volumes in
+  `docker-compose.faketime.yaml` carry the license + PLC boot
+  project across every container recreate so the runtime keeps
+  booting PLC 851/852 into `RUN` reliably.
 - On GitHub cloud runners each job lands on different physical
   hardware, so the SystemId changes every run. A trial issued for
   run *N* is invalid for run *N+1* — and the runtime falls back to

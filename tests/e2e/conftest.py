@@ -12,13 +12,7 @@ from pathlib import Path
 import pytest
 
 CONTAINER_ENGINE = os.environ.get("CONTAINER_ENGINE", "docker")
-# When USE_LICENSED_IMAGE=1 is set, the licensed overlay is included so the
-# tc31-xar-base:licensed image (bundled license + PLC boot project) runs.
-# Default: plain test stack (base image, no PLC deployed).
-_BASE_COMPOSE = ["-f", "docker-compose.yaml", "-f", "docker-compose.test.yaml"]
-if os.environ.get("USE_LICENSED_IMAGE") == "1":
-    _BASE_COMPOSE += ["-f", "docker-compose.licensed.yaml"]
-COMPOSE_FILES = _BASE_COMPOSE
+COMPOSE_FILES = ["-f", "docker-compose.yaml", "-f", "docker-compose.test.yaml"]
 STACK_SERVICE = "tc31-xar-base"
 MQTT_HOST = os.environ.get("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))

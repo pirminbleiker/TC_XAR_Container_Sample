@@ -10,14 +10,16 @@ packaged for two very different targets:
 
 What you can do with this sample:
 
-- Build a three-tier image stack for the XAR runtime
-  (`:latest`, `:faketime`, `:licensed`) with Docker + BuildKit secrets.
+- Build a two-tier image stack for the XAR runtime
+  (`:latest`, `:faketime`) with Docker + BuildKit secrets.
 - Run ADS-over-MQTT communication with a Mosquitto sidecar.
 - Deploy a PLC project from TwinCAT Engineering running inside a
   Hyper-V VM, using only a Windows Firewall rule (no `netsh portproxy`).
-- Automate a CI pipeline on GitHub Actions that builds all images, runs
+- Persist the issued trial license + PLC boot project in named volumes
+  so container rebuilds pick them back up — the license stays valid
+  as long as the host's SystemId does.
+- Automate a CI pipeline on GitHub Actions that builds both images, runs
   unit + end-to-end tests (System Service, ADS, MQTT bridge).
-- Run the full licensed PLC suite locally with a bundled trial license.
 
 Topology:
 
@@ -160,13 +162,12 @@ sudo make restart-containers
 
 ## Image tiers
 
-The repo builds three images from the same XAR base:
+The repo builds two images from the same XAR base:
 
 | Tag | What's in it | Typical use |
 | --- | --- | --- |
 | `tc31-xar-base:latest` | Debian trixie + `tc31-xar-um` + mosquitto-clients + busybox-syslogd. Entrypoint uses `-f 0x5` (systemd-unit default) and handles `PCI_DEVICES=NONE` so the RT-Ethernet probe is skipped. | Base tests, CI, RT-Linux IPCs. |
-| `tc31-xar-base:faketime` | `:latest` + `libfaketime`. Entrypoint forwards `FAKETIME` env through `LD_PRELOAD`. Freezes the container clock to a fixed timestamp so the 7-day trial license never expires during tests. | Local activation flow: boot once, Engineering activates, license file persists in a named volume. |
-| `tc31-xar-base:licensed` | `:faketime` + the captured trial license + compiled PLC boot project from `tc31-xar-base/bundled/`. Runs PLC 851/852 on first start without any Engineering step. | Repeatable local PLC verification, demos, self-hosted CI runner. |
+| `tc31-xar-base:faketime` | `:latest` + `libfaketime`. Entrypoint forwards `FAKETIME` env through `LD_PRELOAD`. Freezes the container clock to a fixed timestamp so the 7-day trial license never expires during tests — combined with the named volumes in `docker-compose.faketime.yaml` (`tc-license`, `tc-boot`) the license + PLC survive container recreates. | Engineering-activation workflow + parallel self-hosted CI runs sharing one license volume. |
 
 ## Running the tests
 
@@ -174,7 +175,6 @@ The repo includes a **pytest** based suite with two layers:
 
 - `tests/unit/` — static config checks (compose YAML, Dockerfile, entrypoint, secrets, StaticRoutes). Does **not** start any container.
 - `tests/e2e/` — end-to-end checks. Brings up the stack via `docker-compose.yaml` + `docker-compose.test.yaml`, verifies that `TcSystemServiceUm` boots, that the MQTT broker relays `AdsOverMqtt/#` frames, and drives ADS reads/notifications against the system service (port 10000) via `pyads` — **no PLC runtime required**.
-- `tests/e2e/test_plc_runtime.py` — additional asserts that PLC 851 and 852 are in `RUN` on the `:licensed` image. Only runs when `USE_LICENSED_IMAGE=1` is set (the conftest then also pulls in `docker-compose.licensed.yaml`).
 
 The test stack uses **Docker** by default (override with `CONTAINER_ENGINE=podman`). It adds a host-routable static ADS route (`192.168.20.100` → AMS NetId `1.1.1.1.1.1`) via a mounted test-only `StaticRoutes.xml`, so the host-side pyads sidecar can talk to the container without dynamic `AddRoute`.
 
@@ -211,40 +211,37 @@ python -m invoke test-stack-down
 
 `test-e2e-sidecar` is the recommended path on Windows: `pyads` needs `TcAdsDll.dll` locally (ships only with TwinCAT Engineering). The sidecar uses the Linux `pyads` wheel with `libads.so` so no Windows ADS runtime is required. The sidecar pins IP `192.168.20.100` — this matches the static route in `tests/fixtures/StaticRoutes.test.xml` mounted into the XAR container, so the router accepts ADS frames from the test client.
 
-### Local PLC verification with the `:licensed` image
+### Persistent license + PLC boot via volumes (`:faketime` overlay)
 
-Once Engineering has activated the trial once on your host (or you have
-`tc31-xar-base/bundled/` populated), the full PLC suite runs locally:
+`docker-compose.faketime.yaml` mounts two named volumes:
+
+- `tc-license` → `/etc/TwinCAT/3.1/Target/License`
+- `tc-boot` → `/etc/TwinCAT/3.1/Boot`
+
+Combined with a fixed `FAKETIME` inside the trial window the license
+and deployed PLC project survive every `docker compose down` /
+`docker rm` cycle on the same host — the license stays valid because
+the SystemId stays stable, and the `FAKETIME` anchor prevents expiry.
+
+On a shared self-hosted runner, point several test containers at the
+same named volume (or a volume driver backed by a USB-dongle license
+cache) so parallel CI runs consume one legitimate license:
 
 ```powershell
-python -m invoke build                       # builds :latest, :faketime
-# build :licensed manually — it uses the same Dockerfile pattern:
-docker build --secret id=apt,src=./tc31-xar-base/apt-config/bhf.conf `
-             -t tc31-xar-base:licensed -f tc31-xar-base/Dockerfile.licensed tc31-xar-base
-
+# First time on this host only: activate via Engineering.
 docker compose -f docker-compose.yaml `
                -f docker-compose.test.yaml `
-               -f docker-compose.licensed.yaml up -d
-
-# pytest against the bundled PLC
-$env:USE_LICENSED_IMAGE="1"
-pytest tests/e2e/test_plc_runtime.py -v
+               -f docker-compose.faketime.yaml up -d
+# ...open Engineering, connect via MQTT route, Activate Configuration...
+# Subsequent runs reuse the persisted volumes:
+docker compose -f docker-compose.yaml `
+               -f docker-compose.test.yaml `
+               -f docker-compose.faketime.yaml up -d
 ```
 
-Expected: `PLC 851`, `PLC 852` both in `RUN` with symbol counts in the
-hundreds (TcUnit framework + log4TC).
-
-### Re-capturing the bundled trial
-
-The trial is valid 7 days from the issue timestamp. When it expires,
-re-activate from Engineering and re-snapshot:
-
-```powershell
-docker cp tc31-xar-base:/etc/TwinCAT/3.1/Target/License/TrialLicense.tclrs tc31-xar-base/bundled/TrialLicense.tclrs
-docker cp tc31-xar-base:/etc/TwinCAT/3.1/Boot tc31-xar-base/bundled/Boot
-# strip /bundled/Boot/LoggedEvents.db and anything else runtime-specific
-docker build -t tc31-xar-base:licensed -f tc31-xar-base/Dockerfile.licensed tc31-xar-base
-```
+When the 7-day trial eventually lapses, click *Activate 7 Days Trial*
+once more in Engineering — the new license lands back in `tc-license`
+and the next container start validates again.
 
 > **Kernel limitation**: TwinCAT XAR expects a PREEMPT_RT kernel (Beckhoff RT-Linux). On the stock WSL2 kernel the runtime still boots in this sample because the entrypoint uses `-f 0x5` (aligned with the systemd unit) and disables RT-Ethernet via `PCI_DEVICES=NONE`. Some advanced features (ADS notifications against system symbols, RT-Ethernet) are not testable outside a real Beckhoff IPC — affected tests skip with an explicit message.
 
@@ -339,7 +336,7 @@ docker exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'AdsOverMqtt/#' -v
 | --- | --- | --- |
 | `unit-linux` | `ubuntu-latest` | Static config tests — no Docker, fast. |
 | `unit-windows` | `windows-latest` | Same static suite on Windows — catches CRLF / path regressions. |
-| `e2e-linux` | `ubuntu-latest` | Builds all three images (`:latest`, `:faketime`, `:licensed`), brings the base stack up, runs `tests/e2e` (minus `test_plc_runtime.py`) inside a pinned sidecar container on `192.168.20.100`. |
+| `e2e-linux` | `ubuntu-latest` | Builds both images (`:latest`, `:faketime`), brings the base stack up, runs `tests/e2e` inside a pinned sidecar container on `192.168.20.100`. |
 
 Requires the repo secret `BHF_APT_CONF` — paste the full netrc-style
 content of your `bhf.conf`. Without it the `e2e-linux` job fails fast
@@ -356,7 +353,8 @@ issued for run *N* is rejected in run *N+1*.
 Options if you need PLC tests in CI:
 
 - Run a **self-hosted Linux runner** on your own hardware: SystemId
-  stays stable, the bundled license is valid there indefinitely.
+  stays stable, the trial license persisted in the `tc-license` volume
+  stays valid as long as the Engineering-activated trial is current.
 - See [`docs/beckhoff-cloud-ci-proposal.md`](./docs/beckhoff-cloud-ci-proposal.md)
   for ideas we think would unblock cloud-native testing cleanly.
 
