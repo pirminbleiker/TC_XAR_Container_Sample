@@ -208,3 +208,28 @@ viable paths are:
   bundled license works).
 - **PLC tests local-only**; CI validates build + base runtime + MQTT +
   System Service ADS — which is what the workflow now does.
+
+## Follow-up experiments (SystemId pinning — ALL failed)
+
+Tried to make the bundled trial portable across hosts:
+
+1. Bake `TcSelfSigned.xml` + `/etc/machine-id` into image → signature
+   validates (`Valid(3)`) cross-host but product consumption still
+   rejects `TC3 PLC`.
+2. Bind-mount a snapshot of `/proc/cpuinfo` from the activation host
+   into the container → no effect on the computed SystemId. TwinCAT
+   reads CPUID via the instruction directly, not via procfs.
+3. Attempted to bind-mount `/proc/sys/kernel/random/boot_id` → Docker
+   runtime rejects any mount inside `/proc/sys` for safety.
+4. Searched for a persisted SystemId file (user's hypothesis) with
+   `find /etc /var -iname '*systemid*'` and binary grep for the GUID
+   bytes — nothing. SystemId is recomputed from host hardware on every
+   runtime start (cached in-memory after that).
+5. Verified SystemId stability on same host: `docker rm` + `docker run`
+   yields same GUID. Verified per-run variance on GH Actions: three
+   consecutive runs produced `519f0458…`, `6d8ee7ea…`, `f619c3c6…`.
+
+The license's hardware-binding is enforced at product-consumption
+time, not just signature validation — so neither image-state baking
+nor procfs spoofing can unify the SystemId across different physical
+hosts.

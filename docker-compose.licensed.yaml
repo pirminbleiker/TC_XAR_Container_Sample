@@ -14,10 +14,3 @@
 services:
   tc31-xar-base:
     image: tc31-xar-base:licensed
-    volumes:
-      # Force /proc/cpuinfo to the snapshot captured from the host the
-      # bundled trial was activated on. TwinCAT mixes CPU vendor/family/
-      # model into its SystemId derivation; bind-mounting a fixed
-      # snapshot makes the SystemId reproducible across hosts (GH
-      # runners, workstations) even when the actual CPU differs.
-      - ./tc31-xar-base/bundled/cpuinfo.snapshot:/proc/cpuinfo:ro
