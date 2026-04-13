@@ -1,18 +1,30 @@
 # About this Repository
 
-This repository provides a step-by-step guide to build and deploy a containerized TwinCAT 3.1 XAR runtime environment using Docker on a Beckhoff IPC.
+A containerised TwinCAT 3.1 XAR runtime (Beckhoff's Linux edition)
+packaged for two very different targets:
 
-With this sample, you will learn how to:
+- **A real Beckhoff RT-Linux IPC** — deterministic, production-grade.
+- **A developer workstation or a GitHub Actions runner** — non-RT,
+  good enough for integration testing (compose up, deploy a PLC from
+  Engineering, drive ADS / ADS-over-MQTT from a Python test suite).
 
-- Build and configure a TwinCAT XAR container image.
-- Set up secure communication using ADS-over-MQTT.
-- Manage containers with Docker Compose and Makefile automation.
-- Connect to the containerized TwinCAT runtime with TwinCAT Engineering.
-- Configure real-time Ethernet communication (optional).
+What you can do with this sample:
 
-Here’s a high-level overview of what the completed setup will look like:
+- Build a three-tier image stack for the XAR runtime
+  (`:latest`, `:faketime`, `:licensed`) with Docker + BuildKit secrets.
+- Run ADS-over-MQTT communication with a Mosquitto sidecar.
+- Deploy a PLC project from TwinCAT Engineering running inside a
+  Hyper-V VM, using only a Windows Firewall rule (no `netsh portproxy`).
+- Automate a CI pipeline on GitHub Actions that builds all images, runs
+  unit + end-to-end tests (System Service, ADS, MQTT bridge).
+- Run the full licensed PLC suite locally with a bundled trial license.
+
+Topology:
 
 ![](./docs/setup-overview.drawio.svg)
+
+> 📝 Ideas for Beckhoff on making this easier in the cloud:
+> [`docs/beckhoff-cloud-ci-proposal.md`](./docs/beckhoff-cloud-ci-proposal.md)
 
 ---
 
@@ -22,7 +34,7 @@ Should you have any questions regarding the provided sample code, please contact
 
 ---
 
-## Using the sample
+## Using the sample on a Beckhoff RT-Linux IPC (production path)
 
 Before you begin, make sure your environment meets the following prerequisites:
 
@@ -30,6 +42,9 @@ Before you begin, make sure your environment meets the following prerequisites:
 - [Configure access to Beckhoff package server](https://infosys.beckhoff.com/english.php?content=../content/1033/beckhoff_rt_linux/17350408843.html)
 - Install [Docker Engine on Debian](https://docs.docker.com/engine/install/debian/#install-using-the-repository)
 - Run the following command to install the TwinCAT System Configuration tools and make on the host: `sudo apt install --yes make tcsysconf`
+
+> For the **non-RT dev/CI path** (Docker Desktop on Windows, `ubuntu-latest`
+> runners, etc.) skip this section and jump to [Running the tests](#running-the-tests).
 
 Once the prerequisites are in place, you can follow these steps to build and deploy the TwinCAT XAR container:
 
@@ -143,12 +158,23 @@ sudo make restart-containers
 
 ---
 
+## Image tiers
+
+The repo builds three images from the same XAR base:
+
+| Tag | What's in it | Typical use |
+| --- | --- | --- |
+| `tc31-xar-base:latest` | Debian trixie + `tc31-xar-um` + mosquitto-clients + busybox-syslogd. Entrypoint uses `-f 0x5` (systemd-unit default) and handles `PCI_DEVICES=NONE` so the RT-Ethernet probe is skipped. | Base tests, CI, RT-Linux IPCs. |
+| `tc31-xar-base:faketime` | `:latest` + `libfaketime`. Entrypoint forwards `FAKETIME` env through `LD_PRELOAD`. Freezes the container clock to a fixed timestamp so the 7-day trial license never expires during tests. | Local activation flow: boot once, Engineering activates, license file persists in a named volume. |
+| `tc31-xar-base:licensed` | `:faketime` + the captured trial license + compiled PLC boot project from `tc31-xar-base/bundled/`. Runs PLC 851/852 on first start without any Engineering step. | Repeatable local PLC verification, demos, self-hosted CI runner. |
+
 ## Running the tests
 
 The repo includes a **pytest** based suite with two layers:
 
 - `tests/unit/` — static config checks (compose YAML, Dockerfile, entrypoint, secrets, StaticRoutes). Does **not** start any container.
 - `tests/e2e/` — end-to-end checks. Brings up the stack via `docker-compose.yaml` + `docker-compose.test.yaml`, verifies that `TcSystemServiceUm` boots, that the MQTT broker relays `AdsOverMqtt/#` frames, and drives ADS reads/notifications against the system service (port 10000) via `pyads` — **no PLC runtime required**.
+- `tests/e2e/test_plc_runtime.py` — additional asserts that PLC 851 and 852 are in `RUN` on the `:licensed` image. Only runs when `USE_LICENSED_IMAGE=1` is set (the conftest then also pulls in `docker-compose.licensed.yaml`).
 
 The test stack uses **Docker** by default (override with `CONTAINER_ENGINE=podman`). It adds a host-routable static ADS route (`192.168.20.100` → AMS NetId `1.1.1.1.1.1`) via a mounted test-only `StaticRoutes.xml`, so the host-side pyads sidecar can talk to the container without dynamic `AddRoute`.
 
@@ -185,6 +211,41 @@ python -m invoke test-stack-down
 
 `test-e2e-sidecar` is the recommended path on Windows: `pyads` needs `TcAdsDll.dll` locally (ships only with TwinCAT Engineering). The sidecar uses the Linux `pyads` wheel with `libads.so` so no Windows ADS runtime is required. The sidecar pins IP `192.168.20.100` — this matches the static route in `tests/fixtures/StaticRoutes.test.xml` mounted into the XAR container, so the router accepts ADS frames from the test client.
 
+### Local PLC verification with the `:licensed` image
+
+Once Engineering has activated the trial once on your host (or you have
+`tc31-xar-base/bundled/` populated), the full PLC suite runs locally:
+
+```powershell
+python -m invoke build                       # builds :latest, :faketime
+# build :licensed manually — it uses the same Dockerfile pattern:
+docker build --secret id=apt,src=./tc31-xar-base/apt-config/bhf.conf `
+             -t tc31-xar-base:licensed -f tc31-xar-base/Dockerfile.licensed tc31-xar-base
+
+docker compose -f docker-compose.yaml `
+               -f docker-compose.test.yaml `
+               -f docker-compose.licensed.yaml up -d
+
+# pytest against the bundled PLC
+$env:USE_LICENSED_IMAGE="1"
+pytest tests/e2e/test_plc_runtime.py -v
+```
+
+Expected: `PLC 851`, `PLC 852` both in `RUN` with symbol counts in the
+hundreds (TcUnit framework + log4TC).
+
+### Re-capturing the bundled trial
+
+The trial is valid 7 days from the issue timestamp. When it expires,
+re-activate from Engineering and re-snapshot:
+
+```powershell
+docker cp tc31-xar-base:/etc/TwinCAT/3.1/Target/License/TrialLicense.tclrs tc31-xar-base/bundled/TrialLicense.tclrs
+docker cp tc31-xar-base:/etc/TwinCAT/3.1/Boot tc31-xar-base/bundled/Boot
+# strip /bundled/Boot/LoggedEvents.db and anything else runtime-specific
+docker build -t tc31-xar-base:licensed -f tc31-xar-base/Dockerfile.licensed tc31-xar-base
+```
+
 > **Kernel limitation**: TwinCAT XAR expects a PREEMPT_RT kernel (Beckhoff RT-Linux). On the stock WSL2 kernel the runtime still boots in this sample because the entrypoint uses `-f 0x5` (aligned with the systemd unit) and disables RT-Ethernet via `PCI_DEVICES=NONE`. Some advanced features (ADS notifications against system symbols, RT-Ethernet) are not testable outside a real Beckhoff IPC — affected tests skip with an explicit message.
 
 ### Manual ADS-over-MQTT sanity check
@@ -220,8 +281,12 @@ Docker Desktop's `vpnkit-bridge` listens on `:::1883` (IPv6 dual-stack) which al
 ```powershell
 # From the repo root:
 pwsh -File scripts/expose-mqtt-to-hyperv.ps1
-# Optional: -HostSwitchIp <your-Default-Switch-IP>  if different from 172.18.240.1
 ```
+
+The script only adds a Windows Firewall rule for inbound TCP/1883 and
+clears any stale `netsh portproxy` entries on the same port (a
+portproxy entry is actively harmful here — Docker Desktop's
+dual-stack listener would get its own traffic bounced back to it).
 
 Verify from the VM:
 
@@ -268,5 +333,33 @@ docker exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'AdsOverMqtt/#' -v
 
 ### CI
 
-`.github/workflows/test.yml` runs the **unit** suite on Linux and Windows runners and the **e2e** suite on a Linux runner (Docker preinstalled on ubuntu-latest). The e2e job requires the `BHF_APT_CONF` repository secret (full netrc-style content of `bhf.conf`). A Windows e2e job is intentionally not provided — Docker Desktop on the hosted Windows runner requires interactive license acceptance.
+`.github/workflows/test.yml` runs:
+
+| Job | Runner | What it validates |
+| --- | --- | --- |
+| `unit-linux` | `ubuntu-latest` | Static config tests — no Docker, fast. |
+| `unit-windows` | `windows-latest` | Same static suite on Windows — catches CRLF / path regressions. |
+| `e2e-linux` | `ubuntu-latest` | Builds all three images (`:latest`, `:faketime`, `:licensed`), brings the base stack up, runs `tests/e2e` (minus `test_plc_runtime.py`) inside a pinned sidecar container on `192.168.20.100`. |
+
+Requires the repo secret `BHF_APT_CONF` — paste the full netrc-style
+content of your `bhf.conf`. Without it the `e2e-linux` job fails fast
+and doesn't try to build.
+
+**Why PLC tests don't run on GitHub-hosted runners**
+
+TwinCAT binds the trial license to a SystemId derived from kernel-level
+CPU info (the CPUID instruction, not `/proc/cpuinfo`). GitHub cloud
+runners assign a different physical VM per job, so the SystemId —
+and therefore the needed license — changes on every run. A license
+issued for run *N* is rejected in run *N+1*.
+
+Options if you need PLC tests in CI:
+
+- Run a **self-hosted Linux runner** on your own hardware: SystemId
+  stays stable, the bundled license is valid there indefinitely.
+- See [`docs/beckhoff-cloud-ci-proposal.md`](./docs/beckhoff-cloud-ci-proposal.md)
+  for ideas we think would unblock cloud-native testing cleanly.
+
+A Windows e2e job is intentionally not provided — Docker Desktop on
+`windows-latest` requires interactive license acceptance.
 
