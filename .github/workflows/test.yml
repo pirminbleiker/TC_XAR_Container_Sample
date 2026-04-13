@@ -109,21 +109,37 @@ jobs:
       - name: Tear down base stack
         if: always()
         run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml down -v
-      # NOTE: bundled `:licensed` PLC verification is NOT part of the
-      # standard CI runner — the Engineering-exported CurrentConfig pins
-      # thread AffinityMask=#x200 (bit 9 → CPU core 9). Standard
-      # ubuntu-latest runners expose only 4 vCPUs, so TwinCAT's I/O
-      # driver state-transitions fail (Init12\IO SAFEOP → AdsError 1792)
-      # and the runtime stays in CONFIG (AdsState 15). Either:
-      #   1. use a larger runner (>= 10 cores), e.g.
-      #      `runs-on: ubuntu-latest-16-core`, and re-enable the licensed
-      #      steps below, or
-      #   2. run tests/e2e/test_plc_runtime.py locally — the bundled image
-      #      boots PLC 851 + 852 into RUN on a >=10-core Docker Desktop.
-      #
-      # The base (no PLC) e2e suite already validates build + runtime
-      # boot + ADS system port + MQTT bridge — sufficient for integration
-      # sanity on small runners.
+      - name: Bring up licensed stack (bundled PLC)
+        run: docker compose -f docker-compose.yaml -f docker-compose.test.yaml -f docker-compose.licensed.yaml up -d
+      - name: Wait for licensed runtime to reach RUN
+        run: |
+          for i in $(seq 1 60); do
+            sleep 1
+            if docker exec tc31-xar-base sh -c 'cat /var/log/syslog 2>/dev/null' | grep -q 'AdsState: >5<'; then
+              echo "TwinCAT reached AdsState RUN after ${i}s"
+              break
+            fi
+          done
+          echo "--- tc31-xar-base syslog tail ---"
+          docker exec tc31-xar-base sh -c 'cat /var/log/syslog 2>/dev/null' | tail -20 || true
+      - name: Run PLC e2e tests (bundled licensed image, sidecar)
+        env:
+          USE_LICENSED_IMAGE: "1"
+        run: |
+          docker run --rm --network container-network --ip 192.168.20.100 \
+            -v "$PWD:/work:z" -w /work \
+            -e STACK_ALREADY_UP=1 -e USE_LICENSED_IMAGE=1 -e MQTT_HOST=mosquitto \
+            -e ADS_HOST=tc31-xar-base -e ADS_AMS_NETID=15.15.15.15.1.1 \
+            -e LOCAL_AMS_NETID=1.1.1.1.1.1 \
+            python:3.12-slim bash -c \
+              "pip install --quiet pytest pyads paho-mqtt pyyaml lxml && \
+               pytest tests/e2e/test_plc_runtime.py -v"
+      - name: Dump container logs on PLC failure
+        if: failure()
+        run: |
+          echo "--- tc31-xar-base docker logs ---"; docker logs tc31-xar-base || true
+          echo "--- tc31-xar-base syslog ---"; docker exec tc31-xar-base cat /var/log/syslog || true
+          echo "--- mosquitto ---"; docker logs mosquitto || true
 
   # NOTE: e2e-windows is intentionally omitted. Docker Desktop on
   # windows-latest runners is unavailable (requires interactive license
