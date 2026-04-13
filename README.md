@@ -138,31 +138,59 @@ The containerized TwinCAT runtime should appear as an available target system.
 
 5. **Configure real-time Ethernet**
 
-Real-time Ethernet communication requires the `vfio-pci` driver for a PCI based network device. 
-Use the command line tool `TcRteInstall` to assign the `vfio-pci` driver to network devices of the IPC.
+Real-time Ethernet communication requires the `vfio-pci` driver for a
+PCI based network device. On a Beckhoff RT-Linux IPC:
 
-1. List available network device for Real-Time Ethernet communication
+1. List available network devices:
 
-```bash
-sudo TcRteInstall -l
-```
-2. Assign the driver by passing the PCI device `Location`:
+   ```bash
+   sudo TcRteInstall -l
+   ```
 
-```bash
-sudo TcRteInstall -b <PCI device Location>
-```
+2. Bind the chosen NIC to `vfio-pci`:
 
-3. Verify the assignment:
+   ```bash
+   sudo TcRteInstall -b <PCI device Location>   # e.g. 0000:02:00.0
+   ```
 
-```bash
-sudo TcRteInstall -l
-```
+3. Verify:
 
-4. For TwinCAT to detect the new configuration restart the TwinCAT runtime container via:
+   ```bash
+   sudo TcRteInstall -l
+   ```
 
-```
-sudo make restart-containers
-```
+4. Give the container access to the NIC + tell the TwinCAT runtime to
+   use it. Extend `docker-compose.yaml` (or use an override):
+
+   ```yaml
+   services:
+     tc31-xar-base:
+       devices:
+         - /dev/vfio/vfio
+         - /dev/vfio/<iommu-group-id>   # ls /dev/vfio to find it
+       environment:
+         - AMS_NETID=15.15.15.15.1.1
+         - PCI_DEVICES=0000:02:00.0
+       # for direct ADS-TCP routing you also want predictable addresses
+       # inside the LAN; assign fixed IPs here in RT deployments.
+       networks:
+         container-network:
+           ipv4_address: 192.168.20.3
+   ```
+
+5. Restart the runtime so the entrypoint re-runs `TcRteInstall -b` for
+   the PCI device and TwinCAT picks it up:
+
+   ```bash
+   sudo make stop-and-remove-containers && sudo make run-containers
+   ```
+
+> **Fixed IPs on RT deployments**: direct ADS-TCP routing between IPCs
+> and Engineering hosts expects stable addresses. The base compose in
+> this repo uses DNS-only for the dev/CI path; when going to RT
+> reinstate `ipv4_address` on the services plus the Engineering host's
+> LAN IP in `StaticRoutes.xml`. MQTT transport works with hostnames
+> either way because the runtime resolves the broker on-demand.
 
 ---
 
@@ -193,7 +221,9 @@ One unified image — `tc31-xar-base:latest`:
   output all persist across container recreates on the same host.
 
 **MQTT route is env-templated** — the broker address, port and topic
-in `StaticRoutes.xml` are regenerated on every boot from:
+in `StaticRoutes.xml` are regenerated on every boot from the
+environment. `MQTT_BROKER_HOST` accepts a **hostname** (TwinCAT
+resolves it on-demand when connecting to the broker):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

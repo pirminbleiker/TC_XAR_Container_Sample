@@ -6,6 +6,13 @@ xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2015/12/TcConfig"
         <Address Port="1883">mosquitto</Address>
         <Topic>AdsOverMqtt</Topic>
     </Mqtt>
+    <!-- <Mqtt> uses a hostname because the runtime resolves it on-demand
+         at outbound connect time. <Route> is used for INBOUND source-IP
+         validation; TwinCAT resolves the Address once at startup and
+         compares against the source IP of incoming ADS-TCP packets.
+         That means hostname resolution only works when the peer is up
+         at runtime start — not the case for our short-lived pyads
+         sidecar. A fixed IP is therefore pinned here instead. -->
     <Route>
         <Name>test-host</Name>
         <Address>192.168.20.100</Address>
