@@ -10,9 +10,12 @@
 # brings the PLC back to RUN as long as you stay on the same host.
 #
 # Requirements on the Docker host:
-#   - /dev/hugepages mounted hugetlbfs with at least 64 pages reserved,
-#     e.g. `sudo sysctl vm.nr_hugepages=64` (or 1024 for headroom).
 #   - privileged + rt scheduling ulimits (see services.tc31-xar-base).
+#   - /dev/hugepages is bind-mounted for forward-compatibility. The empty
+#     sample + soft-RT dev/CI workloads run fine without any pages reserved.
+#     Only real PLC projects with a non-zero LockedMemSize (EtherCAT master,
+#     large router memory, etc.) require host-side allocation, e.g.
+#     `sudo sysctl vm.nr_hugepages=1024`.
 
 networks:
   container-network:

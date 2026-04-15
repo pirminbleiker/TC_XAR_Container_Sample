@@ -311,11 +311,35 @@ make test-e2e                      # runs the full stack + ADS assertions
 
 `make` is optional on Windows — use the `invoke` task runner instead:
 
-```powershell
-# One-time: Docker Desktop uses WSL2 backend. TwinCAT needs hugepages in the
-# WSL kernel (the runtime's LockedMemSize demands hugetlbfs-backed memory).
-wsl -d docker-desktop -u root -- sysctl vm.nr_hugepages=1024
+One-time (optional): Docker Desktop uses the WSL2 backend. The empty sample
+and soft-RT dev/CI workloads run without any hugepages reserved. Only real
+PLC projects with a non-zero `LockedMemSize` (EtherCAT master, large router
+memory) need hugetlbfs-backed memory in the WSL kernel — in that case make
+the allocation persistent across Docker Desktop / host restarts by adding
+the kernel boot parameters to `%UserProfile%\.wslconfig`:
 
+```ini
+[wsl2]
+memory=8GB
+kernelCommandLine=default_hugepagesz=2M hugepagesz=2M hugepages=1024
+```
+
+`default_hugepagesz=2M` is required — without it the WSL2 kernel allocates
+the 1024 pages into a different pool and caps the 2M pool at 64 pages.
+Apply with `wsl --shutdown` + Docker Desktop restart, then verify:
+
+```powershell
+wsl -d docker-desktop -u root -- cat /proc/meminfo | Select-String HugePages_Total
+# HugePages_Total:    1024
+```
+
+Runtime-only fallback (lost on every Docker Desktop restart):
+
+```powershell
+wsl -d docker-desktop -u root -- sysctl vm.nr_hugepages=1024
+```
+
+```powershell
 python -m invoke --list
 python -m invoke build                  # docker build
 python -m invoke test-unit

@@ -4,14 +4,6 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# TwinCAT system configuration (allocates hugepages, prepares RT state).
-# Matches the TcSysConf.service unit which normally runs before the system
-# service on a regular install. Skipped if the binary is absent or fails
-# (typical in minimal containers without D-Bus).
-if command -v TcSysConf >/dev/null 2>&1; then
-    TcSysConf --set-hugepages "${TC_HUGEPAGES:-64}" || true
-fi
-
 # Optional RT-Ethernet binding. PCI_DEVICES is a space-separated list of
 # PCI slot addresses (see `TcRteInstall -l`). Special value NONE disables
 # all RT-Ethernet binding — required for hosts without a passthrough NIC
@@ -57,9 +49,18 @@ fi
 
 # Start a tiny syslog daemon so TcSystemServiceUm's syslog() calls (the
 # Linux-side equivalent of the Windows TwinCAT System Event Logger) land
-# somewhere readable — /var/log/messages.
+# on the container's stdout — `docker logs` then surfaces them alongside
+# the runtime's own stdout output.
+#   -n        run in foreground (keeps inherited fds alive)
+#   -f /dev/null  ignore /etc/syslog.conf (Debian ships one that would
+#                 otherwise route facilities to /var/log/syslog etc. and
+#                 override -O)
+#   -O -      write all log lines to syslogd's stdout, which is this
+#                 script's stdout (PID 1), i.e. the container pipe
+#                 surfaced by `docker logs`
+#   -S        compact output (drop redundant timestamp/host fields)
 if command -v busybox >/dev/null 2>&1 && [ ! -S /dev/log ]; then
-    busybox syslogd -S -L -O /var/log/messages -s 1024 -b 0 || true
+    busybox syslogd -n -S -f /dev/null -O - &
 fi
 
 # Indicate the script's start for logging purposes
